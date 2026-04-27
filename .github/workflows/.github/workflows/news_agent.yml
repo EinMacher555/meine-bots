@@ -1,0 +1,30 @@
+# Was tut das? → Schickt jeden Morgen um 7:30 Uhr deutsche News
+name: Daily News Agent
+
+on:
+  schedule:
+    - cron: '30 6 * * *'  # 06:30 UTC = 07:30 Deutschland
+  workflow_dispatch:        # Auch manuell startbar
+
+jobs:
+  send-news:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Code holen
+        uses: actions/checkout@v4
+
+      - name: Python einrichten
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Pakete installieren
+        run: pip install requests python-dotenv
+
+      - name: News-Agent starten
+        run: python news_agent.py
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        
