@@ -1,0 +1,20 @@
+name: Keepalive (verhindert Deaktivierung)
+
+on:
+  schedule:
+    - cron: "0 12 * * 1"
+  workflow_dispatch:
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Keepalive commit
+        run: |
+          git config user.email "nexus-bot@github.com"
+          git config user.name "NEXUS Bot"
+          echo $(date) > .keepalive
+          git add .keepalive
+          git commit -m "keepalive: $(date '+%Y-%m-%d')"
+          git push
