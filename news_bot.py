@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""NEXUS News Bot - Breaking News auf Englisch & Deutsch -> Telegram via GitHub Actions"""
+"""NEXUS News Bot - NUR deine Lesezeichen-Quellen -> Telegram"""
 import os, json, urllib.request, urllib.parse, xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
@@ -8,35 +8,41 @@ BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID   = os.environ["TELEGRAM_CHAT_ID"]
 MODE      = os.environ.get("MODE", "live")
 
-FEEDS_EN = {
-    "Reuters World":    "https://feeds.reuters.com/reuters/worldNews",
-    "Reuters Business": "https://feeds.reuters.com/reuters/businessNews",
-    "BBC World":        "http://feeds.bbci.co.uk/news/world/rss.xml",
-    "CoinDesk":         "https://www.coindesk.com/arc/outboundfeeds/rss/",
-    "CoinTelegraph":    "https://cointelegraph.com/rss",
-    "Al Jazeera":       "https://www.aljazeera.com/xml/rss/all.xml",
-    "Yonhap EN":        "https://en.yna.co.kr/RSS/news.xml",
-    "Korea Herald":     "https://www.koreaherald.com/common/rss_xml.php?ct=102",
+# === NUR deine Lesezeichen-Quellen ===
+# Quellen MIT RSS Feed
+FEEDS = {
+    # Krypto
+    "CoinTelegraph":      ("https://cointelegraph.com/rss",                             "EN"),
+    "CoinDesk":           ("https://www.coindesk.com/arc/outboundfeeds/rss/",           "EN"),
+    "CryptoPanic":        ("https://cryptopanic.com/news/rss/",                          "EN"),
+    "BTC-ECHO":           ("https://www.btc-echo.de/feed/",                             "DE"),
+    # Maerkte & Wirtschaft
+    "Reuters Business":   ("https://feeds.reuters.com/reuters/businessNews",            "EN"),
+    "Reuters World":      ("https://feeds.reuters.com/reuters/worldNews",               "EN"),
+    "Investing.com":      ("https://www.investing.com/rss/news.rss",                   "EN"),
+    "Trading Economics":  ("https://tradingeconomics.com/rss",                          "EN"),
+    "CFTC Press":         ("https://www.cftc.gov/rss/pressreleases.xml",               "EN"),
 }
-FEEDS_DE = {
-    "Tagesschau":   "https://www.tagesschau.de/xml/rss2/",
-    "DW Deutsch":   "https://rss.dw.com/rdf/rss-de-all",
-    "Spiegel":      "https://www.spiegel.de/schlagzeilen/index.rss",
-    "Handelsblatt": "https://www.handelsblatt.com/rss09/politik.xml",
-}
+
 HIGH_KW = [
-    "missile","attack","explosion","war","invasion","nuclear","sanctions","nato",
-    "coup","assassination","north korea","iran","trump","xi jinping","putin","tariff","trade war",
-    "rakete","angriff","krieg","atomwaffen","sanktionen","putsch","attentat","nordkorea","handelskrieg",
-    "bitcoin","btc","crypto","ethereum","etf","crash","hack","collapse","bankruptcy","binance",
+    # Krypto
+    "bitcoin","btc","crypto","ethereum","etf","crash","hack","collapse","bankruptcy",
+    "binance","coinbase","sec crypto","fed crypto","regulation",
+    # Geopolitik
+    "missile","attack","war","invasion","nuclear","sanctions","nato","coup",
+    "north korea","iran","trump","putin","tariff","trade war",
+    # Wirtschaft
     "fed rate","interest rate","federal reserve","ecb rate","recession","inflation",
-    "oil price","market crash","rate hike","rate cut",
-    "leitzins","zinsentscheidung","rezession","oelpreis","boersencrash","ezb","bundesbank",
+    "oil price","market crash","rate hike","rate cut","gdp",
+    # Deutsch
+    "leitzins","zinsentscheidung","rezession","boersencrash","ezb","bundesbank",
+    "krypto","bitcoin kurs",
+    # Korea
     "kospi","kosdaq","samsung","hyundai","sk hynix","bank of korea",
 ]
 MED_KW = [
-    "earnings","gdp","unemployment","opec","g7","g20","imf","blockchain","defi",
-    "konjunktur","arbeitslosigkeit","bip","haushalt","schulden",
+    "earnings","unemployment","opec","g7","g20","imf","blockchain","defi","altcoin",
+    "forex","dollar","euro","yen","gold","silver","oil","commodity",
 ]
 
 def send_tg(text):
@@ -57,7 +63,7 @@ def fetch_feed(name, url, lang="EN"):
     try:
         root = ET.parse(urllib.request.urlopen(
             urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"}),
-            timeout=10)).getroot()
+            timeout=12)).getroot()
         ns = (root.tag.split("}")[0]+"}") if root.tag.startswith("{") else ""
         for item in root.iter(f"{ns}item"):
             title = (item.findtext(f"{ns}title") or "").strip()
@@ -76,26 +82,22 @@ def score(t):
 
 def category(t):
     t = t.lower()
-    if any(k in t for k in ["bitcoin","btc","crypto","ethereum","coin","defi","krypto","blockchain"]):
-        return "B", "KRYPTO / CRYPTO"
-    if any(k in t for k in ["kospi","kosdaq","samsung","hyundai","korea","yonhap","seoul"]):
-        return "KR", "KOREA"
-    if any(k in t for k in ["trump","white house","pentagon","congress"]):
-        return "US", "USA / TRUMP"
-    if any(k in t for k in ["fed","ecb","ezb","rate","zinsen","gdp","bip","recession",
-                              "rezession","inflation","oil","gold","markt","market"]):
-        return "ECO", "WIRTSCHAFT / ECONOMY"
-    return "WP", "WELTPOLITIK / WORLD"
-
-def lang_flag(lang):
-    return "[DE]" if lang == "DE" else "[EN]"
+    if any(k in t for k in ["bitcoin","btc","crypto","ethereum","coin","defi","krypto","blockchain","binance","coinbase"]):
+        return "KRYPTO / CRYPTO"
+    if any(k in t for k in ["kospi","kosdaq","samsung","hyundai","korea","seoul"]):
+        return "KOREA"
+    if any(k in t for k in ["trump","white house","congress","tariff","trade war"]):
+        return "USA / TRUMP"
+    if any(k in t for k in ["fed","ecb","ezb","rate","zinsen","gdp","recession","inflation","oil","gold","forex","dollar"]):
+        return "WIRTSCHAFT / ECONOMY"
+    return "WELTPOLITIK / WORLD"
 
 def run_live():
     now    = datetime.now(timezone.utc)
     cutoff = now - timedelta(minutes=35)
     all_items = []
-    for n, u in FEEDS_EN.items(): all_items.extend(fetch_feed(n, u, "EN"))
-    for n, u in FEEDS_DE.items(): all_items.extend(fetch_feed(n, u, "DE"))
+    for name, (url, lang) in FEEDS.items():
+        all_items.extend(fetch_feed(name, url, lang))
     seen, fresh = set(), []
     for item in sorted(all_items, key=lambda x: x["pub"], reverse=True):
         if item["pub"] < cutoff: continue
@@ -106,15 +108,16 @@ def run_live():
     top = [(s, i) for s, i in top if s >= 3]
     sent = 0
     for sc, item in top[:5]:
-        _, cat = category(item["title"])
-        flag = lang_flag(item["lang"])
+        cat = category(item["title"])
+        flag = "[DE]" if item["lang"] == "DE" else "[EN]"
         msg = (
             f"<b>BREAKING - {cat}</b>\n\n"
             f"{flag} {item['title']}\n\n"
-            f"Quelle: <a href='{item['link']}'>{item['source']}</a> - {item['pub'].strftime('%H:%M UTC')}"
+            f"Quelle: <a href='{item['link']}'>{item['source']}</a>"
+            f" - {item['pub'].strftime('%H:%M UTC')}"
         )
-        if send_tg(msg): sent += 1; print(f"Sent: {item['title'][:60]}")
-    print(f"Done: {sent} gesendet.")
+        if send_tg(msg): sent += 1; print(f"Sent [{item['source']}]: {item['title'][:60]}")
+    print(f"Fertig: {sent} Nachrichten gesendet.")
 
 def get_price(coin_id):
     try:
@@ -132,29 +135,33 @@ def run_summary():
     btc = f"BTC: ${bp:,.0f} ({bc:+.1f}%)" if bp else "BTC: N/A"
     eth = f"ETH: ${ep:,.0f} ({ec:+.1f}%)" if ep else "ETH: N/A"
     all_items = []
-    for n, u in FEEDS_EN.items(): all_items.extend(fetch_feed(n, u, "EN"))
-    for n, u in FEEDS_DE.items(): all_items.extend(fetch_feed(n, u, "DE"))
+    for name, (url, lang) in FEEDS.items():
+        all_items.extend(fetch_feed(name, url, lang))
     cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
     today_items = [i for i in all_items if i["pub"] >= cutoff]
-    world, crypto, korea, usa = [], [], [], []
+    world, crypto, korea, usa, eco = [], [], [], [], []
     for item in sorted(today_items, key=lambda x: score(x["title"]), reverse=True):
-        _, cat = category(item["title"])
-        flag = lang_flag(item["lang"])
-        entry = f"{flag} {item['title'][:110]}"
-        if cat == "KRYPTO / CRYPTO"       and len(crypto) < 3: crypto.append(entry)
-        elif cat == "KOREA"               and len(korea)  < 3: korea.append(entry)
-        elif cat == "USA / TRUMP"         and len(usa)    < 3: usa.append(entry)
-        elif cat == "WELTPOLITIK / WORLD" and len(world)  < 3: world.append(entry)
+        cat = category(item["title"])
+        flag = "[DE]" if item["lang"] == "DE" else "[EN]"
+        e = f"{flag} {item['source']}: {item['title'][:100]}"
+        if   cat == "KRYPTO / CRYPTO"       and len(crypto) < 3: crypto.append(e)
+        elif cat == "KOREA"                  and len(korea)  < 2: korea.append(e)
+        elif cat == "USA / TRUMP"            and len(usa)    < 3: usa.append(e)
+        elif cat == "WIRTSCHAFT / ECONOMY"   and len(eco)    < 3: eco.append(e)
+        elif cat == "WELTPOLITIK / WORLD"    and len(world)  < 3: world.append(e)
     def fmt(lst): return "\n".join(f"- {i}" for i in lst) if lst else "- Ruhiger Tag / Quiet day"
     msg = (
-        f"<b>NEXUS TAGESABSCHLUSS / DAILY CLOSE - {today}</b>\n"
-        f"==================\n\n"
+        f"<b>NEXUS TAGESABSCHLUSS - {today}</b>\n"
+        f"========================\n\n"
         f"<b>KRYPTO / CRYPTO</b>\n{btc} | {eth}\n{fmt(crypto)}\n\n"
-        f"<b>WELTPOLITIK / WORLD POLITICS</b>\n{fmt(world)}\n\n"
-        f"<b>KOREA</b>\n{fmt(korea)}\n\n"
+        f"<b>WIRTSCHAFT / ECONOMY</b>\n{fmt(eco)}\n\n"
+        f"<b>WELTPOLITIK / WORLD</b>\n{fmt(world)}\n\n"
         f"<b>USA / TRUMP</b>\n{fmt(usa)}\n\n"
+        f"<b>KOREA</b>\n{fmt(korea)}\n\n"
+        f"Quellen: CoinTelegraph, CoinDesk, CryptoPanic, BTC-ECHO,\n"
+        f"Reuters, Investing.com, Trading Economics, CFTC\n"
         f"[DE] = Deutsch | [EN] = English\n"
-        f"==================\n"
+        f"========================\n"
         f"<i>NEXUS - {now_str} Uhr</i>"
     )
     send_tg(msg)
