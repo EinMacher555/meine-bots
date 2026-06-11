@@ -2,8 +2,11 @@ name: NEXUS News Bot
 
 on:
   schedule:
+    # Live: alle 30 Minuten
     - cron: "*/30 * * * *"
+    # Morgen-Briefing: täglich 08:00 CEST (= 06:00 UTC im Sommer)
     - cron: "0 6 * * *"
+    # Tagesabschluss: täglich 22:00 CEST (= 20:00 UTC im Sommer)
     - cron: "0 20 * * *"
   workflow_dispatch:
     inputs:
@@ -12,32 +15,51 @@ on:
         required: false
         default: "live"
 
+permissions:
+  contents: write
+
 jobs:
   run-news-bot:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
       - name: Determine Mode
         id: mode
         run: |
+          # Wenn manuell ausgelöst → Input nutzen
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "mode=${{ github.event.inputs.mode }}" >> $GITHUB_OUTPUT
+          # Tagesabschluss um 20:00 UTC (= 22:00 CEST)
           elif [ "$(date -u +%H)" = "20" ]; then
             echo "mode=summary" >> $GITHUB_OUTPUT
+          # Morgen-Briefing um 06:00 UTC (= 08:00 CEST)
           elif [ "$(date -u +%H)" = "06" ] && [ "$(date -u +%M)" -lt "15" ]; then
             echo "mode=morning" >> $GITHUB_OUTPUT
           else
             echo "mode=live" >> $GITHUB_OUTPUT
           fi
+
       - name: Run News Bot
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           MODE: ${{ steps.mode.outputs.mode }}
         run: python news_bot.py
+
+      - name: Commit HKCM seen file
+        if: steps.mode.outputs.mode == 'live'
+        run: |
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add hkcm_seen.json
+          git diff --staged --quiet || git commit -m "chore: update hkcm_seen [skip ci]"
+          git push || true
