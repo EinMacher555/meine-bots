@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""NEXUS News Bot - Telegram via GitHub Actions"""
-import os, json, urllib.request, urllib.parse, xml.etree.ElementTree as ET
+"""NEXUS News Bot - Breaking News auf Englisch & Deutsch -> Telegram via GitHub Actions"""
+import os, json, re, urllib.request, urllib.parse, xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
 
@@ -8,6 +8,11 @@ BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID   = os.environ["TELEGRAM_CHAT_ID"]
 MODE      = os.environ.get("MODE", "live")
 
+# HKCM Sitemap (öffentlich, kein Login nötig)
+HKCM_SITEMAP   = "https://hkcmanagement.de/sitemaps/sitemap-1.xml"
+HKCM_SEEN_FILE = "hkcm_seen.json"
+
+# Englische + Deutsche Quellen
 FEEDS_EN = {
     "Reuters World":    "https://feeds.reuters.com/reuters/worldNews",
     "Reuters Business": "https://feeds.reuters.com/reuters/businessNews",
@@ -19,33 +24,45 @@ FEEDS_EN = {
     "Korea Herald":     "https://www.koreaherald.com/common/rss_xml.php?ct=102",
 }
 FEEDS_DE = {
-    "Tagesschau":   "https://www.tagesschau.de/xml/rss2/",
-    "DW Deutsch":   "https://rss.dw.com/rdf/rss-de-all",
-    "Spiegel":      "https://www.spiegel.de/schlagzeilen/index.rss",
-    "Handelsblatt": "https://www.handelsblatt.com/rss09/politik.xml",
+    "Tagesschau":       "https://www.tagesschau.de/xml/rss2/",
+    "DW Deutsch":       "https://rss.dw.com/rdf/rss-de-all",
+    "Spiegel":          "https://www.spiegel.de/schlagzeilen/index.rss",
+    "Handelsblatt":     "https://www.handelsblatt.com/rss09/politik.xml",
 }
-HKCM_CHANNEL_ID = "UC3AdN1bEmEonuSwXNS8LixQ"
 
 HIGH_KW = [
+    # Geopolitik EN
     "missile","attack","explosion","war","invasion","nuclear","sanctions","nato",
     "coup","assassination","north korea","iran","trump","xi jinping","putin","tariff","trade war",
-    "rakete","angriff","krieg","atomwaffen","sanktionen","putsch","attentat","nordkorea","handelskrieg",
+    # Geopolitik DE
+    "rakete","angriff","explosion","krieg","invasion","atomwaffen","sanktionen","putsch",
+    "attentat","nordkorea","handelskrieg","z\u00f6lle",
+    # Bitcoin/Krypto
     "bitcoin","btc","crypto","ethereum","etf","crash","hack","collapse","bankruptcy","binance",
+    # Wirtschaft EN
     "fed rate","interest rate","federal reserve","ecb rate","recession","inflation",
     "oil price","market crash","rate hike","rate cut",
-    "leitzins","zinsentscheidung","rezession","boersencrash","ezb","fed","bundesbank",
+    # Wirtschaft DE
+    "leitzins","zinsentscheidung","rezession","inflation","\u00f6lpreis","b\u00f6rsencrash",
+    "ezb","fed","bundesbank",
+    # Korea
     "kospi","kosdaq","samsung","hyundai","sk hynix","bank of korea",
 ]
-MED_KW = ["earnings","gdp","unemployment","opec","g7","g20","imf","blockchain","defi",
-          "konjunktur","arbeitslosigkeit","bip","haushalt","schulden"]
+MED_KW = [
+    "earnings","gdp","unemployment","opec","g7","g20","imf","blockchain","defi",
+    "konjunktur","arbeitslosigkeit","bip","haushalt","schulden",
+]
 
 def send_tg(text):
-    data = urllib.parse.urlencode({"chat_id": CHAT_ID, "text": text,
-        "parse_mode": "HTML", "disable_web_page_preview": "true"}).encode()
+    data = urllib.parse.urlencode({
+        "chat_id": CHAT_ID, "text": text,
+        "parse_mode": "HTML", "disable_web_page_preview": "true"
+    }).encode()
     try:
-        urllib.request.urlopen(urllib.request.Request(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            data=data, method="POST"), timeout=10)
+        urllib.request.urlopen(
+            urllib.request.Request(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                data=data, method="POST"), timeout=10)
         return True
     except Exception as e:
         print(f"TG error: {e}"); return False
@@ -68,26 +85,6 @@ def fetch_feed(name, url, lang="EN"):
         print(f"Feed [{name}]: {e}")
     return items
 
-def fetch_youtube(channel_name, channel_id):
-    url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
-    items = []
-    try:
-        root = ET.parse(urllib.request.urlopen(
-            urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"}),
-            timeout=10)).getroot()
-        ns = "http://www.w3.org/2005/Atom"
-        for entry in root.findall(f"{{{ns}}}entry"):
-            title = (entry.findtext(f"{{{ns}}}title") or "").strip()
-            link_el = entry.find(f"{{{ns}}}link")
-            link = link_el.get("href", "") if link_el is not None else ""
-            pub_str = entry.findtext(f"{{{ns}}}published") or ""
-            try: pub_dt = datetime.fromisoformat(pub_str.replace("Z", "+00:00")).astimezone(timezone.utc)
-            except: pub_dt = datetime.now(timezone.utc)
-            items.append({"title": title, "link": link, "pub": pub_dt, "source": channel_name, "lang": "DE"})
-    except Exception as e:
-        print(f"YouTube [{channel_name}]: {e}")
-    return items
-
 def score(t):
     t = t.lower()
     return sum(3 for k in HIGH_KW if k in t) + sum(1 for k in MED_KW if k in t)
@@ -108,6 +105,127 @@ def category(t):
 def lang_flag(lang):
     return "&#127465;&#127466;" if lang == "DE" else "&#127468;&#127463;"
 
+# ── HKCM Artikel-Tracker (Sitemap-basiert) ────────────────────────────────────────────────
+
+def load_hkcm_seen():
+    try:
+        with open(HKCM_SEEN_FILE, "r") as f:
+            return set(json.load(f))
+    except:
+        return set()
+
+def save_hkcm_seen(slugs):
+    seen_list = sorted(slugs)
+    if len(seen_list) > 500:
+        seen_list = seen_list[-500:]
+    with open(HKCM_SEEN_FILE, "w") as f:
+        json.dump(seen_list, f)
+
+def get_hkcm_title(url, slug):
+    """Artikel-URL aufrufen und <title>-Tag extrahieren"""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            html = r.read(8192).decode("utf-8", errors="ignore")
+        m = re.search(r"<title>([^<]+)</title>", html, re.IGNORECASE)
+        if m:
+            return m.group(1).strip()
+    except Exception as e:
+        print(f"HKCM title [{slug}]: {e}")
+    return " ".join(w.capitalize() for w in slug.replace("-", " ").split())
+
+def check_hkcm():
+    """Neue HKCM-Artikel via Sitemap prüfen und per Telegram benachrichtigen"""
+    try:
+        req = urllib.request.Request(
+            HKCM_SITEMAP, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            xml_text = r.read().decode("utf-8")
+    except Exception as e:
+        print(f"HKCM sitemap error: {e}"); return
+
+    now    = datetime.now(timezone.utc)
+    cutoff = now - timedelta(minutes=35)
+
+    pattern = re.compile(
+        r"<loc>(https://hkcmanagement\.de/hkcmnews/([^<]+))</loc>\s*<lastmod>([^<]+)</lastmod>"
+    )
+
+    seen     = load_hkcm_seen()
+    new_seen = set(seen)
+    sent     = 0
+
+    for m in pattern.finditer(xml_text):
+        url, slug, lastmod_str = m.group(1), m.group(2), m.group(3)
+
+        if slug in seen:
+            continue
+
+        try:
+            lastmod = datetime.fromisoformat(lastmod_str).astimezone(timezone.utc)
+        except:
+            continue
+
+        if lastmod < cutoff:
+            continue
+
+        title = get_hkcm_title(url, slug)
+
+        msg = (
+            f"<b>&#128240; HKCM \u2013 NEUER ARTIKEL</b>\n\n"
+            f"&#127465;&#127466; {title}\n\n"
+            f"&#128279; <a href='{url}'>&#128214; Jetzt lesen</a>"
+            f"  &#183;  {lastmod.strftime('%H:%M')} Uhr"
+        )
+        if send_tg(msg):
+            sent += 1
+            print(f"HKCM: {title[:60]}")
+        new_seen.add(slug)
+
+    if new_seen != seen:
+        save_hkcm_seen(new_seen)
+        print(f"HKCM seen-Datei aktualisiert ({len(new_seen)} Einträge)")
+
+    print(f"HKCM: {sent} neue Artikel gesendet.")
+
+# ── Breaking News ──────────────────────────────────────────────────────────
+
+def run_live():
+    now    = datetime.now(timezone.utc)
+    cutoff = now - timedelta(minutes=35)
+
+    # ── HKCM: neue Artikel sofort melden ──
+    check_hkcm()
+
+    # ── Breaking News aus RSS-Feeds ──
+    all_items = []
+    for n, u in FEEDS_EN.items(): all_items.extend(fetch_feed(n, u, "EN"))
+    for n, u in FEEDS_DE.items(): all_items.extend(fetch_feed(n, u, "DE"))
+
+    seen, fresh = set(), []
+    for item in sorted(all_items, key=lambda x: x["pub"], reverse=True):
+        if item["pub"] < cutoff: continue
+        k = item["title"][:60].lower()
+        if k in seen: continue
+        seen.add(k); fresh.append(item)
+
+    top = sorted([(score(i["title"]), i) for i in fresh], reverse=True)
+    top = [(s, i) for s, i in top if s >= 3]
+    sent = 0
+    for sc, item in top[:5]:
+        em, cat = category(item["title"])
+        flag = lang_flag(item["lang"])
+        msg = (
+            f"<b>&#128680; BREAKING</b> {em} {cat}\n\n"
+            f"{flag} {item['title']}\n\n"
+            f"&#128240; <a href='{item['link']}'>{item['source']}</a> "
+            f"&#183; {item['pub'].strftime('%H:%M UTC')}"
+        )
+        if send_tg(msg): sent += 1; print(f"Sent: {item['title'][:60]}")
+    print(f"Done: {sent} Breaking News gesendet.")
+
+# ── Preise ───────────────────────────────────────────────────────────────────
+
 def get_price(coin_id):
     try:
         with urllib.request.urlopen(
@@ -117,95 +235,101 @@ def get_price(coin_id):
         return d[coin_id]["usd"], d[coin_id]["usd_24h_change"]
     except: return 0.0, 0.0
 
-def run_live():
-    now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(minutes=35)
-    for item in fetch_youtube("HKCM", HKCM_CHANNEL_ID):
-        if item["pub"] >= cutoff:
-            msg = (f"<b>&#127916; HKCM - NEUES VIDEO</b>\n\n"
-                   f"&#127465;&#127466; {item['title']}\n\n"
-                   f"&#128279; <a href='{item['link']}'>Video ansehen</a> &#183; {item['pub'].strftime('%H:%M UTC')}")
-            if send_tg(msg): print(f"HKCM: {item['title'][:60]}")
-    all_items = []
-    for n, u in FEEDS_EN.items(): all_items.extend(fetch_feed(n, u, "EN"))
-    for n, u in FEEDS_DE.items(): all_items.extend(fetch_feed(n, u, "DE"))
-    seen, fresh = set(), []
-    for item in sorted(all_items, key=lambda x: x["pub"], reverse=True):
-        if item["pub"] < cutoff: continue
-        k = item["title"][:60].lower()
-        if k in seen: continue
-        seen.add(k); fresh.append(item)
-    top = [(s,i) for s,i in sorted([(score(i["title"]),i) for i in fresh],reverse=True) if s >= 3]
-    sent = 0
-    for sc, item in top[:5]:
-        em, cat = category(item["title"])
-        flag = lang_flag(item["lang"])
-        msg = (f"<b>&#128680; BREAKING</b> {em} {cat}\n\n"
-               f"{flag} {item['title']}\n\n"
-               f"&#128240; <a href='{item['link']}'>{item['source']}</a> &#183; {item['pub'].strftime('%H:%M UTC')}")
-        if send_tg(msg): sent += 1
-    print(f"Done: {sent} Breaking News gesendet.")
+# ── Morgen-Briefing ──────────────────────────────────────────────────────────
 
 def run_morning():
-    today = datetime.now().strftime("%d.%m.%Y")
-    tag = {"Monday":"Montag","Tuesday":"Dienstag","Wednesday":"Mittwoch","Thursday":"Donnerstag",
-           "Friday":"Freitag","Saturday":"Samstag","Sunday":"Sonntag"}.get(datetime.now().strftime("%A"), "")
-    bp, bc = get_price("bitcoin"); ep, ec = get_price("ethereum")
+    """Morgen-Briefing um 08:00 CEST – letzte 12 Stunden"""
+    today   = datetime.now().strftime("%d.%m.%Y")
+    weekday = datetime.now().strftime("%A")
+    de_days = {
+        "Monday":"Montag","Tuesday":"Dienstag","Wednesday":"Mittwoch",
+        "Thursday":"Donnerstag","Friday":"Freitag","Saturday":"Samstag","Sunday":"Sonntag"
+    }
+    tag = de_days.get(weekday, weekday)
+
+    bp, bc = get_price("bitcoin")
+    ep, ec = get_price("ethereum")
     btc = f"BTC: ${bp:,.0f} ({bc:+.1f}%)" if bp else "BTC: N/A"
     eth = f"ETH: ${ep:,.0f} ({ec:+.1f}%)" if ep else "ETH: N/A"
+
     all_items = []
     for n, u in FEEDS_EN.items(): all_items.extend(fetch_feed(n, u, "EN"))
     for n, u in FEEDS_DE.items(): all_items.extend(fetch_feed(n, u, "DE"))
+
     cutoff = datetime.now(timezone.utc) - timedelta(hours=12)
-    items = [i for i in all_items if i["pub"] >= cutoff]
+    morning_items = [i for i in all_items if i["pub"] >= cutoff]
+
     world, crypto, korea, usa = [], [], [], []
-    for item in sorted(items, key=lambda x: score(x["title"]), reverse=True):
+    for item in sorted(morning_items, key=lambda x: score(x["title"]), reverse=True):
         _, cat = category(item["title"])
-        e = f"{lang_flag(item['lang'])} {item['title'][:110]}"
-        if cat=="KRYPTO / CRYPTO" and len(crypto)<3: crypto.append(e)
-        elif cat=="KOREA" and len(korea)<3: korea.append(e)
-        elif cat=="USA / TRUMP" and len(usa)<3: usa.append(e)
-        elif cat=="WELTPOLITIK / WORLD" and len(world)<3: world.append(e)
+        flag = lang_flag(item["lang"])
+        entry = f"{flag} {item['title'][:110]}"
+        if cat == "KRYPTO / CRYPTO"       and len(crypto) < 3: crypto.append(entry)
+        elif cat == "KOREA"               and len(korea)  < 3: korea.append(entry)
+        elif cat == "USA / TRUMP"         and len(usa)    < 3: usa.append(entry)
+        elif cat == "WELTPOLITIK / WORLD" and len(world)  < 3: world.append(entry)
+
     def fmt(lst): return "\n".join(f"&#8226; {i}" for i in lst) if lst else "&#8226; Ruhige Nacht / Quiet night"
-    msg = (f"&#9728;&#65039; <b>NEXUS MORGEN-BRIEFING</b> &#183; {tag}, {today}\n"
-           f"&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;\n\n"
-           f"&#8383; <b>KRYPTO</b>\n{btc} &#124; {eth}\n{fmt(crypto)}\n\n"
-           f"&#127758; <b>WELTPOLITIK / WORLD</b>\n{fmt(world)}\n\n"
-           f"&#127472;&#127479; <b>KOREA</b>\n{fmt(korea)}\n\n"
-           f"&#127482;&#127480; <b>USA / TRUMP</b>\n{fmt(usa)}\n\n"
-           f"&#127465;&#127466;=DE &#124; &#127468;&#127463;=EN\n&#9472;&#9472;&#9472;&#9472;\n"
-           f"<i>Guten Morgen, Sinuk! &#128522;</i>")
-    send_tg(msg); print("Morgen-Briefing gesendet.")
+
+    msg = (
+        f"&#9728;&#65039; <b>NEXUS MORGEN-BRIEFING</b> &#183; {tag}, {today}\n"
+        f"&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;\n\n"
+        f"&#8383; <b>KRYPTO / CRYPTO</b>\n{btc} &#124; {eth}\n{fmt(crypto)}\n\n"
+        f"&#127758; <b>WELTPOLITIK / WORLD POLITICS</b>\n{fmt(world)}\n\n"
+        f"&#127472;&#127479; <b>KOREA</b>\n{fmt(korea)}\n\n"
+        f"&#127482;&#127480; <b>USA / TRUMP</b>\n{fmt(usa)}\n\n"
+        f"&#127465;&#127466; = Deutsch &#124; &#127468;&#127463; = English\n"
+        f"&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;\n"
+        f"<i>Guten Morgen, Sinuk! &#128522; &#183; NEXUS</i>"
+    )
+    send_tg(msg)
+    print("Morgen-Briefing gesendet.")
+
+# ── Tagesabschluss ───────────────────────────────────────────────────────────
 
 def run_summary():
-    today = datetime.now().strftime("%d.%m.%Y")
+    today   = datetime.now().strftime("%d.%m.%Y")
     now_str = datetime.now().strftime("%H:%M")
-    bp, bc = get_price("bitcoin"); ep, ec = get_price("ethereum")
+
+    bp, bc = get_price("bitcoin")
+    ep, ec = get_price("ethereum")
     btc = f"BTC: ${bp:,.0f} ({bc:+.1f}%)" if bp else "BTC: N/A"
     eth = f"ETH: ${ep:,.0f} ({ec:+.1f}%)" if ep else "ETH: N/A"
+
     all_items = []
     for n, u in FEEDS_EN.items(): all_items.extend(fetch_feed(n, u, "EN"))
     for n, u in FEEDS_DE.items(): all_items.extend(fetch_feed(n, u, "DE"))
+
     cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-    items = [i for i in all_items if i["pub"] >= cutoff]
+    today_items = [i for i in all_items if i["pub"] >= cutoff]
+
     world, crypto, korea, usa = [], [], [], []
-    for item in sorted(items, key=lambda x: score(x["title"]), reverse=True):
+    for item in sorted(today_items, key=lambda x: score(x["title"]), reverse=True):
         _, cat = category(item["title"])
-        e = f"{lang_flag(item['lang'])} {item['title'][:110]}"
-        if cat=="KRYPTO / CRYPTO" and len(crypto)<3: crypto.append(e)
-        elif cat=="KOREA" and len(korea)<3: korea.append(e)
-        elif cat=="USA / TRUMP" and len(usa)<3: usa.append(e)
-        elif cat=="WELTPOLITIK / WORLD" and len(world)<3: world.append(e)
+        flag = lang_flag(item["lang"])
+        entry = f"{flag} {item['title'][:110]}"
+        if cat == "KRYPTO / CRYPTO"       and len(crypto) < 3: crypto.append(entry)
+        elif cat == "KOREA"               and len(korea)  < 3: korea.append(entry)
+        elif cat == "USA / TRUMP"         and len(usa)    < 3: usa.append(entry)
+        elif cat == "WELTPOLITIK / WORLD" and len(world)  < 3: world.append(entry)
+
     def fmt(lst): return "\n".join(f"&#8226; {i}" for i in lst) if lst else "&#8226; Ruhiger Tag / Quiet day"
-    msg = (f"&#127769; <b>NEXUS TAGESABSCHLUSS / DAILY CLOSE</b> &#8212; {today}\n"
-           f"&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;\n\n"
-           f"&#8383; <b>KRYPTO</b>\n{btc} &#124; {eth}\n{fmt(crypto)}\n\n"
-           f"&#127758; <b>WELTPOLITIK / WORLD</b>\n{fmt(world)}\n\n"
-           f"&#127472;&#127479; <b>KOREA</b>\n{fmt(korea)}\n\n"
-           f"&#127482;&#127480; <b>USA / TRUMP</b>\n{fmt(usa)}\n\n"
-           f"&#127465;&#127466;=DE &#124; &#127468;&#127463;=EN\n&#9472;&#9472;&#9472;&#9472;\n"
-           f"<i>NEXUS &#183; {now_str} Uhr</i>")
-    send_tg(msg); print("Tagesabschluss gesendet.")
+
+    msg = (
+        f"&#127769; <b>NEXUS TAGESABSCHLUSS / DAILY CLOSE</b> &#8212; {today}\n"
+        f"&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;\n\n"
+        f"&#8383; <b>KRYPTO / CRYPTO</b>\n{btc} &#124; {eth}\n{fmt(crypto)}\n\n"
+        f"&#127758; <b>WELTPOLITIK / WORLD POLITICS</b>\n{fmt(world)}\n\n"
+        f"&#127472;&#127479; <b>KOREA</b>\n{fmt(korea)}\n\n"
+        f"&#127482;&#127480; <b>USA / TRUMP</b>\n{fmt(usa)}\n\n"
+        f"&#127465;&#127466; = Deutsch &#124; &#127468;&#127463; = English\n"
+        f"&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;\n"
+        f"<i>NEXUS &#183; {now_str} Uhr</i>"
+    )
+    send_tg(msg)
+    print("Tagesabschluss gesendet.")
+
+# ── Entry Point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     if   MODE == "summary": run_summary()
