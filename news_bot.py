@@ -8,7 +8,7 @@ BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID   = os.environ["TELEGRAM_CHAT_ID"]
 MODE      = os.environ.get("MODE", "live")
 
-# HKCM Sitemap (öffentlich, kein Login nötig)
+# HKCM Sitemap (Ã¶ffentlich, kein Login nÃ¶tig)
 HKCM_SITEMAP   = "https://hkcmanagement.de/sitemaps/sitemap-1.xml"
 HKCM_SEEN_FILE = "hkcm_seen.json"
 
@@ -105,7 +105,7 @@ def category(t):
 def lang_flag(lang):
     return "&#127465;&#127466;" if lang == "DE" else "&#127468;&#127463;"
 
-# ── HKCM Artikel-Tracker (Sitemap-basiert) ────────────────────────────────────────────────
+# ââ HKCM Artikel-Tracker (Sitemap-basiert) ââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def load_hkcm_seen():
     try:
@@ -135,7 +135,7 @@ def get_hkcm_title(url, slug):
     return " ".join(w.capitalize() for w in slug.replace("-", " ").split())
 
 def check_hkcm():
-    """Neue HKCM-Artikel via Sitemap prüfen und per Telegram benachrichtigen"""
+    """Neue HKCM-Artikel via Sitemap prÃ¼fen und per Telegram benachrichtigen"""
     try:
         req = urllib.request.Request(
             HKCM_SITEMAP, headers={"User-Agent": "Mozilla/5.0"})
@@ -184,20 +184,20 @@ def check_hkcm():
 
     if new_seen != seen:
         save_hkcm_seen(new_seen)
-        print(f"HKCM seen-Datei aktualisiert ({len(new_seen)} Einträge)")
+        print(f"HKCM seen-Datei aktualisiert ({len(new_seen)} EintrÃ¤ge)")
 
     print(f"HKCM: {sent} neue Artikel gesendet.")
 
-# ── Breaking News ──────────────────────────────────────────────────────────
+# ââ Breaking News ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def run_live():
     now    = datetime.now(timezone.utc)
     cutoff = now - timedelta(minutes=35)
 
-    # ── HKCM: neue Artikel sofort melden ──
+    # ââ HKCM: neue Artikel sofort melden ââ
     check_hkcm()
 
-    # ── Breaking News aus RSS-Feeds ──
+    # ââ Breaking News aus RSS-Feeds ââ
     all_items = []
     for n, u in FEEDS_EN.items(): all_items.extend(fetch_feed(n, u, "EN"))
     for n, u in FEEDS_DE.items(): all_items.extend(fetch_feed(n, u, "DE"))
@@ -209,7 +209,7 @@ def run_live():
         if k in seen: continue
         seen.add(k); fresh.append(item)
 
-    top = sorted([(score(i["title"]), i) for i in fresh], reverse=True)
+    top = sorted([(score(i["title"]), i) for i in fresh], key=lambda x: x[0], reverse=True)
     top = [(s, i) for s, i in top if s >= 3]
     sent = 0
     for sc, item in top[:5]:
@@ -224,7 +224,7 @@ def run_live():
         if send_tg(msg): sent += 1; print(f"Sent: {item['title'][:60]}")
     print(f"Done: {sent} Breaking News gesendet.")
 
-# ── Preise ───────────────────────────────────────────────────────────────────
+# ââ Preise âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def get_price(coin_id):
     try:
@@ -235,10 +235,10 @@ def get_price(coin_id):
         return d[coin_id]["usd"], d[coin_id]["usd_24h_change"]
     except: return 0.0, 0.0
 
-# ── Morgen-Briefing ──────────────────────────────────────────────────────────
+# ââ Morgen-Briefing ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def run_morning():
-    """Morgen-Briefing um 08:00 CEST – letzte 12 Stunden"""
+    """Morgen-Briefing um 08:00 CEST â letzte 12 Stunden"""
     today   = datetime.now().strftime("%d.%m.%Y")
     weekday = datetime.now().strftime("%A")
     de_days = {
@@ -285,7 +285,7 @@ def run_morning():
     send_tg(msg)
     print("Morgen-Briefing gesendet.")
 
-# ── Tagesabschluss ───────────────────────────────────────────────────────────
+# ââ Tagesabschluss âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def run_summary():
     today   = datetime.now().strftime("%d.%m.%Y")
@@ -329,7 +329,7 @@ def run_summary():
     send_tg(msg)
     print("Tagesabschluss gesendet.")
 
-# ── Entry Point ──────────────────────────────────────────────────────────────
+# ââ Entry Point ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 if __name__ == "__main__":
     if   MODE == "summary": run_summary()
