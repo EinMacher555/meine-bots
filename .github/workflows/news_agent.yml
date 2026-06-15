@@ -4,9 +4,9 @@ on:
   schedule:
     # Live: alle 30 Minuten
     - cron: "*/30 * * * *"
-    # Morgen-Briefing: täglich 08:00 CEST (= 06:00 UTC im Sommer)
+    # Morgen-Briefing: tÃ¤glich 08:00 CEST (= 06:00 UTC im Sommer)
     - cron: "0 6 * * *"
-    # Tagesabschluss: täglich 22:00 CEST (= 20:00 UTC im Sommer)
+    # Tagesabschluss: tÃ¤glich 22:00 CEST (= 20:00 UTC im Sommer)
     - cron: "0 20 * * *"
   workflow_dispatch:
     inputs:
@@ -35,7 +35,7 @@ jobs:
       - name: Determine Mode
         id: mode
         run: |
-          # Wenn manuell ausgelöst → Input nutzen
+          # Wenn manuell ausgelÃ¶st â Input nutzen
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "mode=${{ github.event.inputs.mode }}" >> $GITHUB_OUTPUT
           # Tagesabschluss um 20:00 UTC (= 22:00 CEST)
@@ -50,7 +50,7 @@ jobs:
 
       - name: Run News Bot
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           MODE: ${{ steps.mode.outputs.mode }}
         run: python news_bot.py
