@@ -288,7 +288,7 @@ def run_morning():
 # ââ Tagesabschluss âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def run_summary():
-    today   = datetime.now().strftime("%d.%m.%Y")
+        today   = (datetime.strptime(os.environ["OVERRIDE_DATE"], "%Y-%m-%d") if os.environ.get("OVERRIDE_DATE") else datetime.now()).strftime("%d.%m.%Y")
     now_str = datetime.now().strftime("%H:%M")
 
     bp, bc = get_price("bitcoin")
