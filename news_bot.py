@@ -20,7 +20,7 @@ FEEDS_EN = {
     "CoinTelegraph":    "https://cointelegraph.com/rss",
     "Al Jazeera":       "https://www.aljazeera.com/xml/rss/all.xml",
     "Yonhap EN":        "https://en.yna.co.kr/RSS/news.xml",
-    "Yonhap Economy":   "https://en.yna.co.kr/RSS/economy.xml",
+    "Korea Herald":     "https://news.google.com/rss/search?q=when:2d%20site:koreaherald.com&hl=en-US&gl=US&ceid=US:en",
 }
 # Deutsche Quellen
 FEEDS_DE = {
