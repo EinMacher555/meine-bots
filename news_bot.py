@@ -20,14 +20,14 @@ FEEDS_EN = {
     "CoinTelegraph":    "https://cointelegraph.com/rss",
     "Al Jazeera":       "https://www.aljazeera.com/xml/rss/all.xml",
     "Yonhap EN":        "https://en.yna.co.kr/RSS/news.xml",
-    "Korea Herald":     "https://www.koreaherald.com/common/rss_xml.php?ct=102",
+    "Yonhap Economy":   "https://en.yna.co.kr/RSS/economy.xml",
 }
 # Deutsche Quellen
 FEEDS_DE = {
     "Tagesschau":       "https://www.tagesschau.de/xml/rss2/",
     "DW Deutsch":       "https://rss.dw.com/rdf/rss-de-all",
     "FAZ":              "https://www.faz.net/rss/aktuell/",
-    "Handelsblatt":     "https://www.handelsblatt.com/rss09/politik.xml",
+    "Handelsblatt":     "https://www.handelsblatt.com/contentexport/feed/schlagzeilen",
     "BTC Echo":         "https://www.btc-echo.de/feed/",
     "BeInCrypto":       "https://de.beincrypto.com/feed/",
 }
